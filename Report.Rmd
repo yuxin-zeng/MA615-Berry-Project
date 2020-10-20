@@ -1,0 +1,141 @@
+---
+title: "Berry Report"
+author: "Yuxin Zeng"
+date: "2020/10/19"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=T,warning=F,message=F)
+pacman::p_load("knitr","tidyverse","magrittr","stringr","ggplot2")
+```
+
+###1.Introduction
+Data is selected from the NASS database.
+
+###2.Data Peparation
+First of all, read in the data and remove those columns with single repeated values which are meaningless. "State ANSI" is also removed from the dataset since the "State" is clear enough. We find that berries data had only 8 out of 21 columns containing meaningful data. But some of the variables in these 8 columns are not clear enough, and we need to deal with them later.
+When it comes to "Period" column."Year" generally refers to calendar year while the definition of "Marketing year" varies by commodity. For Prices Received data, they both refers to an unweighted average (by month). Only consider the "YEAR" period. 
+Filter out berries with specific numbers in "Value" in order to do further analysis. 
+Divide the data into three parts according to the type of berries, so we get blueberries dataset, raspberries dataset, and strawberries dataset. 
+```{r}
+#Read the data
+berries=read_csv("berries.csv",col_names=T)
+
+#Remove columns with single value
+col=berries%>%summarize_all(n_distinct)
+single=which(col[1,]==1)
+berries%<>%select(-all_of(single))
+#Remove State ANSI
+berries%<>%select(-4)
+#Period="Year"
+berries=berries%>%filter(Period=="YEAR")
+#Filter out berries with specific numbers in "Value"
+berries%<>%filter(Value!="(D)")
+berries%<>%filter(Value!="(NA)")
+
+#Group the data by commodity
+bberry=berries%>%filter(Commodity=="BLUEBERRIES")
+rberry=berries%>%filter(Commodity=="RASPBERRIES")
+sberry=berries%>%filter(Commodity=="STRAWBERRIES")
+```
+
+Focus on blueberries. Separate multiple variables from the same column, merge variables of the same type into a new column, and delete duplicate columns.
+```{r}
+#Separate "Data Item"
+bberry%<>%separate('Data Item',c("B","type","meas","what"), sep=",") 
+bberry%<>%separate(type,c("b1","type","b2","lab1", "lab2"),sep="")
+bberry%<>%mutate(label=paste(lab1,lab2)) 
+bberry%<>%select(-c(B,b1,b2)) 
+
+##Domain & Domain Category
+bberry%<>%separate(Domain,c("D_left","D_right"),sep=",")
+bberry%<>%mutate(D_left="CHEMICAL",D_left="") 
+bberry%<>%mutate(Chemical=paste(D_left,D_right)) 
+bberry%<>%select(-c(D_left,D_right)) 
+
+bberry%<>%separate('Domain Category',c("DC_left","DC_right"), sep=",")
+bberry%<>%separate(DC_left,c("DC_left_l","DC_left_r"),sep=":")
+bberry%<>%separate(DC_right,c("DC_right_l","DC_right_r"),sep=":")
+bberry%<>%select(-c(DC_left_l,DC_right_l))
+
+bberry%<>%select(Year,State,what,meas,label,Chemical,DC_left_r,DC_right_r,Value)
+```
+
+Some variables are not properly separated. We have entries in both the "what" and "meas" columns that begin with "MEASURED IN". Separate them from their current columns and then merge them to unit column.
+```{r}
+#Write a function
+f1 <- function(a,b){
+  if(a){
+    return(b)
+  }else{
+    return("")
+  }
+}
+
+f1_log=c(F,T,T)
+f1_str=c("one","two","three")
+map2(f1_log,f1_str,f1)
+
+#Replace "NA" with blank before using the function
+bberry[is.na(bberry)]=""
+
+#"Meas"
+detect.meas=str_detect(bberry$meas,"MEASURED IN")
+bberry%<>%mutate(new_col1=unlist(map2(detect.meas,bberry$meas,f1))) 
+bberry%<>%mutate(meas=str_replace(bberry$meas,"MEASURED IN.*$", ""))
+
+#"What"
+detect.what=str_detect(bberry$what,"MEASURED IN")
+bberry%<>%mutate(new_col2=unlist(map2(detect.what,bberry$what,f1))) 
+bberry%<>%mutate(what=str_replace(bberry$what,"MEASURED IN.*$", ""))
+
+#Units
+bberry%<>%mutate(units=str_trim(paste(new_col1,new_col2)))
+```
+
+Finally organize the columns and rename them.
+```{r}
+#Rename the columns
+bberry%<>%rename(Marketing=meas,Avg=what,Harvest=label,Chem_family=DC_left_r,Materials=DC_right_r,Measures=units)
+#Joint some columns
+bberry%<>%mutate(production=str_trim(paste(Marketing,Harvest)))
+bberry%<>%mutate(Chemical=str_trim(paste(Chem_family,Chemical)))
+
+bberry%<>%select(Year,State,production,Avg,Measures,Materials,Chemical,Value)
+write.csv(bberry,file="C:/Users/lenovo/Desktop/615 R/berry/bberry.csv")
+```
+
+###3.EDA
+Year,State,production
+```{r}
+#Summary
+options(scipen=200)
+bberry$Value=as.numeric(gsub(",","",bberry$Value))
+dim(bberry) 
+summary(bberry)
+p=qplot(x=Value,data=bberry,ylab='frequency')
+p
+
+#Values are measured in different way
+sum(bberry$Measures=="MEASURED IN LB")
+sum(bberry$Measures=="MEASURED IN $")
+sum(bberry$Measures=="MEASURED IN LB / ACRE / APPLICATION")
+sum(bberry$Measures=="MEASURED IN LB / ACRE / YEAR")
+bberry%<>%filter(Measures=="MEASURED IN LB")
+
+#Year
+p1=boxplot(Value~Year,data=bberry,xlab='year',ylab='value')
+p1
+
+#State
+p2=ggplot(bberry,aes(x=Year,y=Value,fill=State))+geom_bar(position="dodge",stat="identity")+xlab("year")+ylab("value")+labs(fill="State")
+p2
+
+#Production
+p3=ggplot(bberry,aes(x=Year,y=Value,fill=production))+geom_bar(position="dodge",stat="identity")+xlab("year")+ylab("value")+labs(fill="production")
+p3
+```
+
+###4.Reference
+https://quickstats.nass.usda.gov/results/D416E96E-3D5C-324C-9334-1D38DF88FFF1

@@ -1,0 +1,12 @@
+name: berry
+title: berry
+username:
+account: yuxinzeng
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3055400
+bundleId: 3761927
+url: https://yuxinzeng.shinyapps.io/berry/
+when: 1603189464.95254
+asMultiple: FALSE
+asStatic: FALSE
